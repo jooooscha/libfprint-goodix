@@ -631,20 +631,20 @@ fp_enroll_enum_cb (FpiDeviceGoodixMoc  *self,
       return;
     }
 
-  fpi_ssm_jump_to_state (self->task_ssm, FP_ENROLL_CAPTURE);
+  fpi_ssm_next_state (self->task_ssm);
 }
 
 static void
-fp_enroll_init_cb (FpiDeviceGoodixMoc  *self,
-                   gxfp_cmd_response_t *resp,
-                   GError              *error)
+fp_enroll_create_cb (FpiDeviceGoodixMoc  *self,
+                     gxfp_cmd_response_t *resp,
+                     GError              *error)
 {
   if (error)
     {
       fpi_ssm_mark_failed (self->task_ssm, error);
       return;
     }
-  memcpy (self->template_id, resp->enroll_init.tid, TEMPLATE_ID_SIZE);
+  memcpy (self->template_id, resp->enroll_create.tid, TEMPLATE_ID_SIZE);
   fpi_ssm_next_state (self->task_ssm);
 }
 
@@ -837,16 +837,6 @@ fp_enroll_sm_run_state (FpiSsm *ssm, FpDevice *device)
 
   switch (fpi_ssm_get_cur_state (ssm))
     {
-    case FP_ENROLL_ENUM:
-      {
-        goodix_sensor_cmd (self, MOC_CMD0_GETFINGERLIST, MOC_CMD1_DEFAULT,
-                           false,
-                           (const guint8 *) &dummy,
-                           1,
-                           fp_enroll_enum_cb);
-      }
-      break;
-
     case FP_ENROLL_PWR_BTN_SHIELD_ON:
       {
         goodix_sensor_cmd (self, MOC_CMD0_PWR_BTN_SHIELD, MOC_CMD1_PWR_BTN_SHIELD_ON,
@@ -857,13 +847,23 @@ fp_enroll_sm_run_state (FpiSsm *ssm, FpDevice *device)
       }
       break;
 
+    case FP_ENROLL_ENUM:
+      {
+        goodix_sensor_cmd (self, MOC_CMD0_GETFINGERLIST, MOC_CMD1_DEFAULT,
+                           false,
+                           (const guint8 *) &dummy,
+                           1,
+                           fp_enroll_enum_cb);
+      }
+      break;
+
     case FP_ENROLL_CREATE:
       {
         goodix_sensor_cmd (self, MOC_CMD0_ENROLL_INIT, MOC_CMD1_DEFAULT,
                            false,
                            (const guint8 *) &dummy,
                            1,
-                           fp_enroll_init_cb);
+                           fp_enroll_create_cb);
       }
       break;
 
@@ -1294,12 +1294,19 @@ gx_fp_probe (FpDevice *device)
     {
     case 0x6496:
     case 0x60A2:
+    case 0x6014:
+    case 0x6092:
+    case 0x6094:
     case 0x609C:
+    case 0x631C:
+    case 0x634C:
+    case 0x6384:
     case 0x639C:
     case 0x63AC:
     case 0x63BC:
     case 0x63CC:
     case 0x6A94:
+    case 0x659A:
       self->max_enroll_stage = 12;
       break;
 
@@ -1530,8 +1537,14 @@ fpi_device_goodixmoc_init (FpiDeviceGoodixMoc *self)
 
 static const FpIdEntry id_table[] = {
   { .vid = 0x27c6,  .pid = 0x5840,  },
+  { .vid = 0x27c6,  .pid = 0x6014,  },
+  { .vid = 0x27c6,  .pid = 0x6092,  },
+  { .vid = 0x27c6,  .pid = 0x6094,  },
   { .vid = 0x27c6,  .pid = 0x609C,  },
   { .vid = 0x27c6,  .pid = 0x60A2,  },
+  { .vid = 0x27c6,  .pid = 0x631C,  },
+  { .vid = 0x27c6,  .pid = 0x634C,  },
+  { .vid = 0x27c6,  .pid = 0x6384,  },
   { .vid = 0x27c6,  .pid = 0x639C,  },
   { .vid = 0x27c6,  .pid = 0x63AC,  },
   { .vid = 0x27c6,  .pid = 0x63BC,  },
@@ -1541,6 +1554,7 @@ static const FpIdEntry id_table[] = {
   { .vid = 0x27c6,  .pid = 0x658C,  },
   { .vid = 0x27c6,  .pid = 0x6592,  },
   { .vid = 0x27c6,  .pid = 0x6594,  },
+  { .vid = 0x27c6,  .pid = 0x659A,  },
   { .vid = 0x27c6,  .pid = 0x659C,  },
   { .vid = 0x27c6,  .pid = 0x6A94,  },
   { .vid = 0,  .pid = 0,  .driver_data = 0 },   /* terminating entry */
