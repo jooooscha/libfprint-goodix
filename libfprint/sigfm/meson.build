@@ -2,7 +2,8 @@
 sigfm_sources = ['sigfm.cpp']
 
 opencv = dependency('opencv4', required: true)
-doctest = subproject('doctest').get_variable('doctest_dep')
+# doctest = subproject('doctest').get_variable('doctest_dep')
+doctest = dependency('doctest', required: true)
 
 libsigfm = static_library('sigfm',
         sigfm_sources,
