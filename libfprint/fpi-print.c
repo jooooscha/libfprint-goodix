@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "fpi-print.h"
+#include "sigfm/sigfm.hpp"
 #define FP_COMPONENT "print"
 #include "fpi-log.h"
 
@@ -46,8 +48,12 @@
 void
 fpi_print_add_print (FpPrint *print, FpPrint *add)
 {
-  g_return_if_fail (print->type == FPI_PRINT_NBIS);
-  g_return_if_fail (add->type == FPI_PRINT_NBIS);
+  g_return_if_fail (print->type == FPI_PRINT_NBIS ||
+                    print->type == FPI_PRINT_SIGFM);
+  g_return_if_fail (add->type == FPI_PRINT_NBIS ||
+                    add->type == FPI_PRINT_SIGFM);
+  g_return_if_fail (add->type == print->type);
+  g_return_if_fail (add->prints->len > 0);
 
   g_assert (add->prints->len == 1);
   g_ptr_array_add (print->prints, g_memdup2 (add->prints->pdata[0], sizeof (struct xyt_struct)));
@@ -71,10 +77,12 @@ fpi_print_set_type (FpPrint     *print,
   g_return_if_fail (print->type == FPI_PRINT_UNDEFINED);
 
   print->type = type;
-  if (print->type == FPI_PRINT_NBIS)
+  if (print->type == FPI_PRINT_NBIS || print->type == FPI_PRINT_SIGFM)
     {
       g_assert_null (print->prints);
-      print->prints = g_ptr_array_new_with_free_func (g_free);
+      print->prints = g_ptr_array_new_with_free_func (
+        print->type == FPI_PRINT_NBIS ? g_free :
+        (void (*)(void *))(sigfm_free_info));
     }
   g_object_notify (G_OBJECT (print), "fpi-type");
 }
@@ -160,7 +168,8 @@ fpi_print_add_from_image (FpPrint *print,
   struct fp_minutiae _minutiae;
   struct xyt_struct *xyt;
 
-  if (print->type != FPI_PRINT_NBIS || !image)
+  if ((print->type != FPI_PRINT_NBIS && print->type != FPI_PRINT_SIGFM) ||
+      !image)
     {
       g_set_error (error,
                    G_IO_ERROR,
@@ -168,24 +177,29 @@ fpi_print_add_from_image (FpPrint *print,
                    "Cannot add print data from image!");
       return FALSE;
     }
-
-  minutiae = fp_image_get_minutiae (image);
-  if (!minutiae || minutiae->len == 0)
+  if (print->type == FPI_PRINT_NBIS)
     {
-      g_set_error (error,
-                   G_IO_ERROR,
-                   G_IO_ERROR_INVALID_DATA,
-                   "No minutiae found in image or not yet detected!");
-      return FALSE;
+      minutiae = fp_image_get_minutiae (image);
+      if (!minutiae || minutiae->len == 0)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                       "No minutiae found in image or not yet detected!");
+          return FALSE;
+        }
+
+      _minutiae.num = minutiae->len;
+      _minutiae.list = (struct fp_minutia **) minutiae->pdata;
+      _minutiae.alloc = minutiae->len;
+
+      xyt = g_new0 (struct xyt_struct, 1);
+      minutiae_to_xyt (&_minutiae, image->width, image->height, xyt);
+      g_ptr_array_add (print->prints, xyt);
     }
-
-  _minutiae.num = minutiae->len;
-  _minutiae.list = (struct fp_minutia **) minutiae->pdata;
-  _minutiae.alloc = minutiae->len;
-
-  xyt = g_new0 (struct xyt_struct, 1);
-  minutiae_to_xyt (&_minutiae, image->width, image->height, xyt);
-  g_ptr_array_add (print->prints, xyt);
+  else if (print->type == FPI_PRINT_SIGFM)
+    {
+      SigfmImgInfo * info = fp_image_get_sigfm_info (image);
+      g_ptr_array_add (print->prints, info);
+    }
 
   g_clear_object (&print->image);
   print->image = g_object_ref (image);
@@ -217,7 +231,7 @@ fpi_print_bz3_match (FpPrint *template, FpPrint *print, gint bz3_threshold, GErr
   gint i;
 
   /* XXX: Use a different error type? */
-  if (template->type != FPI_PRINT_NBIS || print->type != FPI_PRINT_NBIS)
+  if (template->type != FPI_PRINT_NBIS)
     {
       *error = fpi_device_error_new_msg (FP_DEVICE_ERROR_NOT_SUPPORTED,
                                          "It is only possible to match NBIS type print data");
@@ -246,6 +260,36 @@ fpi_print_bz3_match (FpPrint *template, FpPrint *print, gint bz3_threshold, GErr
         return FPI_MATCH_SUCCESS;
     }
 
+  return FPI_MATCH_FAIL;
+}
+
+FpiMatchResult
+fpi_print_sigfm_match (FpPrint * template, FpPrint * print,
+                     gint bz3_threshold, GError ** error)
+{
+  if (template->type != FPI_PRINT_SIGFM)
+    {
+      *error = fpi_device_error_new_msg (
+        FP_DEVICE_ERROR_NOT_SUPPORTED,
+        "Cannot call sigfm match with non-sigfm print data, type was %d",
+        template->type);
+      return FPI_MATCH_ERROR;
+    }
+  SigfmImgInfo * against = g_ptr_array_index (print->prints, 0);
+  for (int i = 0; i != template->prints->len; ++i)
+    {
+      SigfmImgInfo * pinfo = g_ptr_array_index (template->prints, i);
+      int score = sigfm_match_score (pinfo, against);
+      if (score < 0)
+        {
+          *error = fpi_device_error_new_msg (FP_DEVICE_ERROR_DATA_INVALID,
+                                             "error in sigfm_match_score");
+          return FPI_MATCH_ERROR;
+        }
+      fp_dbg ("sigfm score %d/%d", score, bz3_threshold);
+      if (score >= bz3_threshold)
+        return FPI_MATCH_SUCCESS;
+    }
   return FPI_MATCH_FAIL;
 }
 
